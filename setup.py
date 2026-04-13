@@ -14,6 +14,7 @@ setup(
                       'numpy',                     
                       'tqdm',                     
                       'openai',
+                      'dspy',
                       ],
 
     classifiers=[

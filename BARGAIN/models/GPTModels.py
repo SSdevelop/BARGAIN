@@ -1,14 +1,9 @@
 from openai import OpenAI
 import os
 import json
-from pydantic import BaseModel
 import numpy as np
 
 from BARGAIN.models.AbstractModels import Oracle, Proxy
-
-class GeneralOracleAnswer(BaseModel):
-  is_correct: bool
-  correct_answer: str
 
 def get_bool_val_prob(res, logprobs=None):
     if logprobs is None:
@@ -42,7 +37,12 @@ class OpenAIProxy(Proxy):
                 task:str,
                 is_binary:bool=False,
                 model:str='gpt-4o-mini',
-                verbose:bool=True
+                verbose:bool=True,
+                base_url:str|None=None,
+                api_key:str|None=None,
+                max_tokens:int|None=None,
+                extra_body:dict|None=None,
+                max_workers:int=1
             ) -> None :
         '''
         Args: 
@@ -50,15 +50,23 @@ class OpenAIProxy(Proxy):
             is_binary: Set to `True` if the task is a binary classifiction task. **WARNING** If `True`, `task` should have directions to ensure `model` outputs only True or False
             model: Name of OpenAI model
             verbose: provide progress updates
+            base_url: Base URL for an OpenAI-compatible API server (e.g. vLLM). Defaults to the OpenAI API when None.
+            api_key: API key for authentication. Falls back to the OPENAI_API_KEY environment variable when None.
+            max_tokens: Maximum number of tokens to generate for non-binary tasks. None means no limit.
+            extra_body: Extra parameters to pass in the request body (e.g. for vLLM chat_template_kwargs).
+            max_workers: Number of parallel threads for API calls. Defaults to 1 (sequential).
 
         '''
-        super().__init__(verbose=verbose)
+        super().__init__(verbose=verbose, max_workers=max_workers)
         self.task = task
         self.is_binary=is_binary
         self.model = model
+        self.max_tokens = max_tokens
+        self.extra_body = extra_body
 
         self.client = OpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY"),
+            api_key=api_key or os.environ.get("OPENAI_API_KEY"),
+            base_url=base_url,
         )
 
     def proxy_func_general(self, data_record):
@@ -67,8 +75,11 @@ class OpenAIProxy(Proxy):
                     {"role": "system", "content": "You are a helpful assistant that is good at processing data."},
                     {"role": "user", "content": task_with_data}
                     ]
-        response = self.client.beta.chat.completions.parse( model=self.model, messages=prompt, logprobs=True, seed=0, temperature=0)
+        response = self.client.chat.completions.create(
+            model=self.model, messages=prompt, logprobs=True, seed=0, temperature=0,
+            max_tokens=self.max_tokens, extra_body=self.extra_body)
         if response.choices[0].logprobs is None:
+            print(f"Logprobs are None")
             prob = 0
         else:
             logprobs = response.choices[0].logprobs.content
@@ -85,7 +96,7 @@ class OpenAIProxy(Proxy):
                     {"role": "system", "content": "You are a helpful assistant that is good at processing data."},
                     {"role": "user", "content": task_with_data}
                     ]
-        response = self.client.beta.chat.completions.parse( model=self.model, messages=prompt, logprobs=True, seed=0, temperature=0, max_tokens=2, top_logprobs=10)
+        response = self.client.chat.completions.create( model=self.model, messages=prompt, logprobs=True, seed=0, temperature=0, max_tokens=2, top_logprobs=10, extra_body=self.extra_body)
         res =response.choices[0].message.content
         logprobs = response.choices[0].logprobs.content
         return get_bool_val_prob(res, logprobs)
@@ -102,7 +113,13 @@ class OpenAIOracle(Oracle):
         task:str,
         is_binary:bool=False,
         model:str='gpt-4o',
-        verbose:bool=True
+        verbose:bool=True,
+        base_url:str|None=None,
+        api_key:str|None=None,
+        judge=None,
+        max_tokens:int|None=None,
+        extra_body:dict|None=None,
+        max_workers:int=1
     ):
         '''
         Args: 
@@ -110,15 +127,29 @@ class OpenAIOracle(Oracle):
             is_binary: Set to `True` if the task is a binary classifiction task. **WARNING** If `True`, `task` should have directions to ensure `model` outputs only True or False
             model: Name of OpenAI model
             verbose: provide progress updates
+            base_url: Base URL for an OpenAI-compatible API server (e.g. vLLM). Defaults to the OpenAI API when None.
+            api_key: API key for authentication. Falls back to the OPENAI_API_KEY environment variable when None.
+            judge: Optional callable with signature (query, document, oracle_output, proxy_output) -> float.
+                `query` is the task template, `document` is the raw data record.
+                When provided, used in place of exact-match comparison for open-ended (non-binary) tasks.
+                Should return a score between 0.0 and 1.0 (e.g. semantic F1).
+                Has no effect on binary tasks. Example: DSPySemanticJudge().
+            max_tokens: Maximum number of tokens to generate for non-binary tasks. None means no limit.
+            extra_body: Extra parameters to pass in the request body (e.g. for vLLM chat_template_kwargs).
+            max_workers: Number of parallel threads for API calls. Defaults to 1 (sequential).
 
         '''
-        super().__init__(verbose=verbose)
+        super().__init__(verbose=verbose, max_workers=max_workers)
         self.task = task
         self.is_binary=is_binary
         self.model = model
+        self.judge = judge
+        self.max_tokens = max_tokens
+        self.extra_body = extra_body
 
         self.client = OpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY"),
+            api_key=api_key or os.environ.get("OPENAI_API_KEY"),
+            base_url=base_url,
         )
 
     def oracle_func_binary(self, data_record, proxy_output):
@@ -127,7 +158,7 @@ class OpenAIOracle(Oracle):
                     {"role": "system", "content": "You are a helpful assistant that is good at processing data."},
                     {"role": "user", "content": task_with_data}
                 ]
-        response = self.client.beta.chat.completions.parse( model=self.model, messages=prompt, logprobs=False, seed=0, temperature=0, max_tokens=2)
+        response = self.client.chat.completions.create( model=self.model, messages=prompt, logprobs=False, seed=0, temperature=0, max_tokens=2, extra_body=self.extra_body)
         res=response.choices[0].message.content
         oracle_output = get_bool_val_prob(res)
         return oracle_output == proxy_output, oracle_output
@@ -138,9 +169,15 @@ class OpenAIOracle(Oracle):
                     {"role": "system", "content": "You are a helpful assistant that is good at processing data."},
                     {"role": "user", "content": task_with_data}
                 ]
-        response = self.client.beta.chat.completions.parse( model=self.model, messages=prompt, logprobs=False, seed=0, temperature=0)
+        response = self.client.chat.completions.create(
+            model=self.model, messages=prompt, logprobs=False, seed=0, temperature=0,
+            max_tokens=self.max_tokens, extra_body=self.extra_body)
         oracle_output=response.choices[0].message.content
-        return proxy_output == oracle_output, oracle_output
+        if self.judge is not None:
+            is_correct = self.judge(self.task, data_record, oracle_output, proxy_output)
+        else:
+            is_correct = (proxy_output == oracle_output)
+        return is_correct, oracle_output
     
     def oracle_func(self, data_record, proxy_output):
         if self.is_binary:

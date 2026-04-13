@@ -12,5 +12,6 @@ from BARGAIN.process.BARGAIN_R import BARGAIN_R
 
 from BARGAIN.models.GPTModels import OpenAIOracle, OpenAIProxy
 from BARGAIN.models.AbstractModels import Oracle, Proxy
+from BARGAIN.models.DSPyJudge import DSPySemanticJudge
 
-__all__ = ['BARGAIN_A', 'BARGAIN_P', 'BARGAIN_R', 'OpenAIOracle', 'OpenAIProxy', 'Oracle', 'Proxy']
+__all__ = ['BARGAIN_A', 'BARGAIN_P', 'BARGAIN_R', 'OpenAIOracle', 'OpenAIProxy', 'Oracle', 'Proxy', 'DSPySemanticJudge']

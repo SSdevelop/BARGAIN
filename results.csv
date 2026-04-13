@@ -1,0 +1,5 @@
+script,metric,score,proxy_fraction,time_seconds
+court_reverse,semantic_f1,0.963,0.45,12502.2
+review_extract_praised_games,semantic_f1,0.980,0.51,1984.3
+legal_doc_extract,semantic_f1,0.956,0.87,1231.7
+enron_filter,semantic_f1,0.939,0.60,4884.5
